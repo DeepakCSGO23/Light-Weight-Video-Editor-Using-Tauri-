@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Fonts */
+@font-face {
+    font-family: 'font-roboto';
+    src: url('fonts/RobotoCondensed-VariableFont_wght.ttf');
+}
+
+.font-roboto {
+    font-family: 'font-roboto';
+}
+
+/* Sliders */
+input[type="range"] {
+    pointer-events: none; /* Disabling pointer events for the whole slider */
+}
+
+input[type="range"]::-webkit-slider-thumb {
+    pointer-events: all; /* Enabling pointer events only for the thumb */
+    appearance: none;
+}
+/* Min Slider Thumb */
+.min::-webkit-slider-thumb {
+    height: 60px;
+    width: 20px;
+    background: url('../src-tauri/icons/trim-left-side.svg') no-repeat center;
+    background-size: contain;
+    border: 5px white;
+}
+
+/* Max Slider Thumb */
+.max::-webkit-slider-thumb {
+    height: 60px;
+    width: 20px;
+    background: url('../src-tauri/icons/trim-right-side.svg') no-repeat center;
+    background-size: contain;
+}
+
+/* Current Slider Thumb */
+.red-slider::-webkit-slider-thumb {
+    height: 100px;
+    width: 20px;
+    background: url('../src-tauri/icons/current.svg') no-repeat center;
+    background-size: contain;
+}
+/* Scrollbar */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 12px;
+}
+::-webkit-scrollbar-thumb {
+    -webkit-border-radius: 10px;
+    background: rgba(65, 60, 60, 0.8); 
+}
