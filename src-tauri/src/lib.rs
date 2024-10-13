@@ -1,5 +1,7 @@
+use std::io::{BufRead, BufReader};
+use std::process::Stdio;
 use std::process::{Command, Output};
-
+use tauri::{AppHandle, Emitter};
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -38,30 +40,46 @@ fn trim_video(input: &str, output: &str, start: f64, duration: f64) -> Result<St
         Err(format!("Error trimming video: {}", error_message.trim()))
     }
 }
-// Extracting audio from video
+// Extracting audio from video with progress event being send to the frontend
 #[tauri::command]
-fn extract_audio(input: &str, output: &str) -> Result<String, String> {
-    // Execute the command to extract audio
-    let output: Output = Command::new("ffmpeg")
+fn extract_audio(input: &str, output: &str, app: AppHandle) -> Result<String, String> {
+    println!("extracting...");
+
+    let mut command = Command::new("ffmpeg")
         .args(&[
             "-i", input, // Input video file
             "-vn", // Disable video, to extract only the audio
             "-acodec", "copy", // Copy the audio codec as-is (no re-encoding)
             output, // Output audio file (e.g., output.mp3 or output.aac)
         ])
-        .output()
+        .stderr(Stdio::piped()) // Capture stderr to read progress
+        .spawn()
         .map_err(|e| format!("Failed to execute command: {}", e))?;
+    println!("completed extracting...");
+    if let Some(stderr) = command.stderr.take() {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines() {
+            if let Ok(line) = line {
+                // Parse the progress information
+                if line.contains("time=") {
+                    println!("time is : {}", line);
+                    // Send the progress event to the frontend
+                    app.emit("trim-progress", line).unwrap();
+                }
+            }
+        }
+    }
 
-    // Check if the command was successful
-    if output.status.success() {
-        let success_message = String::from_utf8_lossy(&output.stdout);
-        Ok(format!(
-            "Audio extracted successfully: {}",
-            success_message.trim()
-        ))
+    let output = command
+        .wait()
+        .map_err(|e| format!("Failed to wait for command: {}", e))?;
+    println!("here");
+    if output.success() {
+        println!("success...");
+        Ok("Audio extracted successfully".to_string())
     } else {
-        let error_message = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Error extracting audio: {}", error_message.trim()))
+        println!("fail...");
+        Err("Error extracting audio".to_string())
     }
 }
 // Getting meta data of video file

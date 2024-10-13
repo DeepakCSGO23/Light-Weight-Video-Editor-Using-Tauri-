@@ -2,6 +2,8 @@
 import { useEffect, useRef, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { listen } from "@tauri-apps/api/event";
+
 import "./App.css";
 function App() {
   const videoRef = useRef(null);
@@ -16,18 +18,21 @@ function App() {
   const [isVideoTrimmedSuccessfully, setIsVideoTrimmedSuccessfully] =
     useState(false);
   const [selectedEditOption, setSelectedEditOption] = useState("trim");
+  const [selectedFilter, setSelectedFilter] = useState("");
   // Side effect is called whenever the user selects new video
   // Reference to the video element
   useEffect(() => {
     const videoElement = videoRef.current;
     if (videoElement) {
+      // When the the video element is inserted in the dom we set the default volume to 0.2 i.e 20% initially
+      videoElement.volume = 0.2;
       // After the video's meta data is loaded we set the total duration state
       const handleLoadedMetaData = () => {
-        setTotalVideoDuration(parseFloat(videoElement.duration));
+        setTotalVideoDuration(videoElement.duration);
       };
       const handleCurrentVideoDurationChange = () => {
         // Updates the current video duration state which is used for
-        setCurrentVideoDuration(parseFloat(videoElement.currentTime));
+        setCurrentVideoDuration(videoElement.currentTime);
       };
       // Adding event listeners to get video total duration metadata after the video's metadata is loaded
       videoElement.addEventListener("loadedmetadata", handleLoadedMetaData);
@@ -97,6 +102,7 @@ function App() {
           filePath: selectedFilePath,
         });
         const videoMetaDataInJson = JSON.parse(videoMetaData);
+        console.log(videoMetaDataInJson);
         // Setting the video's meta data
         setVideoMetaData(videoMetaDataInJson.streams[0]);
         // Closing File menu pop-up
@@ -115,7 +121,7 @@ function App() {
   //? When the dot is moved
   const handleMoveVideoDuration = (e) => {
     // Current Video duration
-    const currentVideoDuration = parseFloat(e.target.value);
+    const currentVideoDuration = e.target.value;
     // Target the video ref (video dom) and change its current time property to the new video duration setup by the range slider
     videoRef.current.currentTime = currentVideoDuration;
     // Update the current video duration state
@@ -123,9 +129,9 @@ function App() {
   };
   // When the left trim controller is moved
   const handleStartingDurationChange = (e) => {
+    console.log(e.target.value);
     //* Parsing string to float because string "9.0" is greater than "11.5" because the ascii value of '9' is greater than '1' so without remaining string it declares string "9.0" is greater than "11.5"
-    const newStartingDuration = parseFloat(e.target.value);
-    console.log(newStartingDuration);
+    const newStartingDuration = e.target.value;
     if (newStartingDuration < endingDuration) {
       setStartingDuration(newStartingDuration);
       // The video duration is changing which calls the setCurrentVideoDuration function which updates the current video duration state
@@ -137,7 +143,7 @@ function App() {
   // When the right trim controller is moved
   const handleEndingDurationChange = (e) => {
     // Parsing string to float because string "9.0" is greater than "11.5" because the ascii value of '9' is greater than '1' so without remaining string it declares string "9.0" is greater than "11.5"
-    const newEndingDuration = parseFloat(e.target.value);
+    const newEndingDuration = e.target.value;
     if (newEndingDuration > startingDuration) {
       setEndingDuration(newEndingDuration);
       if (videoRef.current) {
@@ -160,6 +166,17 @@ function App() {
       videoElement.pause();
     }
   };
+  // For changing volume of video
+  const handleVideoVolumeChange = (e) => {
+    // First check if the video element is present in the DOM
+    const videoElement = videoRef.current;
+    // We found a video element present in the DOM
+    if (videoElement) {
+      const currentVolume = e.target.value / 100;
+      console.log(currentVolume);
+      videoElement.volume = currentVolume;
+    }
+  };
   // When the user clicks the trim video button
   async function handleTrimmingVideo() {
     // Show confirmation dialog before trimming
@@ -176,7 +193,6 @@ function App() {
           start: 5.0,
           duration: 10.0,
         });
-        console.log(result); // Output success message
         setIsVideoTrimmedSuccessfully(true);
         setTimeout(() => {
           setIsVideoTrimmedSuccessfully(false);
@@ -202,18 +218,25 @@ function App() {
     );
     // Confirmation is success
     if (askConfirmation) {
+      // Now the extracting audio process is started in the backend so now we are going to listen to progress events from the backend
+      const unlisten = await listen("trim-progress", (e) => {
+        console.log(e.payload);
+        setProgress(e.payload); // Update progress in state
+      });
       try {
         const result = await invoke("extract_audio", {
           input: "E:/SkillRack Guide/Desktop/Sample.mp4",
-          output: "E:/SkillRack Guide/Desktop/OutputSample.mp4",
+          output: "E:/SkillRack Guide/Desktop/AudioSample.aac",
         });
-        console.log(result); // Output success message
         setIsVideoTrimmedSuccessfully(true);
         setTimeout(() => {
           setIsVideoTrimmedSuccessfully(false);
         }, 4000);
       } catch (error) {
-        console.error("Error trimming video:", error);
+        console.error("Error extracting audio from video:", error);
+      } finally {
+        // Unlisten when extraction is done
+        unlisten();
       }
     }
     // The user cancels the trimming process
@@ -233,7 +256,7 @@ function App() {
       .padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
   return (
-    <div className="bg-[#121212] h-screen w-screen text-white text-sm font-roboto flex flex-col justify-start items-center space-y-6">
+    <div className="bg-[#121212] h-screen w-screen text-white text-sm font-roboto flex flex-col justify-start items-center">
       <header className="p-2 bg-white text-black flex justify-between items-center w-screen">
         <div className="relative w-full">
           <button onClick={() => setShowFileMenu(!showFileMenu)}>File</button>
@@ -261,36 +284,53 @@ function App() {
         </div>
       )}
       {/* Video Player and Playback controls */}
-      <main className="w-[100%] flex p-16 space-x-40">
-        {/* Workspace */}
-        <div className="flex flex-col space-y-4 w-1/4 border-r-2 border-gray-500 border-dashed">
+      <main className="w-[100%] h-[60%] flex p-16 space-x-40">
+        {/* Video file meta data */}
+        <div className="flex flex-col space-y-10 w-1/5">
           {/* Note */}
-          <em className="text-xs mb-16">
+          {/* <em className="text-xs mb-16">
             To modify your preferences, please navigate to the export settings
-          </em>
-          <h1 className="tracking-widest font-bold text-base text-green-400">
+          </em> */}
+          <h1 className="tracking-widest font-bold text-base text-green-400 mb-10">
             META-DATA
           </h1>
-          <span className="overflow-hidden whitespace-nowrap truncate w-80">
-            File Name : {videoFileName}
-          </span>
-          <span>Height : {videoMetaData.height}</span>
-          <span>Width : {videoMetaData.width}</span>
-          <span>Avg Frame Rate : {videoMetaData.avg_frame_rate}</span>
-          <span>Codec Type : {videoMetaData.codec_type}</span>
-          <span>Codec Name : {videoMetaData.codec_name}</span>
+          <div className="flex flex-col space-y-4">
+            <h2 className="overflow-hidden whitespace-nowrap truncate w-72">
+              File Name : {videoFileName}
+            </h2>
+            <h2>Height : {videoMetaData.height}</h2>
+            <h2>Width : {videoMetaData.width}</h2>
+            <h2>Avg Frame Rate : {videoMetaData.avg_frame_rate}</h2>
+            <h2>Codec Type : {videoMetaData.codec_type}</h2>
+            <h2>Codec Name : {videoMetaData.codec_name}</h2>
+          </div>
         </div>
         {videoSrc && (
-          <div className="relative flex flex-col">
+          <div className="relative flex flex-col w-[50%] h-[75%]">
+            {/* <h1 className="text-green-400 tracking-widest text-base font-bold">
+              VIDEO
+            </h1> */}
             <video
-              className={`border-gray-500 border-dashed shadow-2xl ${
+              className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-dashed rounded-t-xl ${
                 selectedEditOption === "crop" && "cursor-crosshair"
-              }`}
+              } ${
+                selectedFilter === "brightness"
+                  ? "brightness-150"
+                  : selectedFilter === "hue"
+                  ? "hue-rotate-90"
+                  : selectedFilter === "saturation"
+                  ? "saturate-150"
+                  : selectedFilter === "grayscale"
+                  ? "grayscale"
+                  : selectedFilter === "sepia"
+                  ? "sepia"
+                  : ""
+              } `}
               ref={videoRef}
               src={videoSrc}
             ></video>
             {/* Playback controls */}
-            <div className="relative flex flex-col rounded-b-3xl bg-neutral-800">
+            <div className="relative flex flex-col rounded-b-3xl bg-zinc-800">
               <input
                 onChange={handleMoveVideoDuration}
                 type="range"
@@ -300,7 +340,7 @@ function App() {
                 step="0.1"
                 className="play-back w-full"
               />
-              <div className="flex items-center space-x-52 p-4 pb-6 ml-10">
+              <div className="flex items-center space-x-40 p-4 pb-6 ml-10">
                 {currentVideoDuration && totalVideoDuration && (
                   <span className="w-fit">
                     {formatFloatDurationToIntegerVideoDuration(
@@ -312,7 +352,16 @@ function App() {
                     )}
                   </span>
                 )}
-                <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-6">
+                  <img
+                    onClick={handlePausingVideo}
+                    className="cursor-pointer"
+                    height="25"
+                    width="25"
+                    src="../src-tauri/icons/pause.svg"
+                    alt="pause-video"
+                    title="Pause Video"
+                  />
                   <img
                     onClick={handlePlayingVideo}
                     className="cursor-pointer"
@@ -322,31 +371,126 @@ function App() {
                     alt="start-video"
                     title="Start Video"
                   />
+                </div>
+                {/* Volume Customization */}
+                <div className="flex space-x-2">
                   <img
                     onClick={handlePausingVideo}
                     className="cursor-pointer"
-                    height="20"
-                    width="20"
-                    src="../src-tauri/icons/pause.svg"
-                    alt="pause-video"
-                    title="Pause Video"
+                    height="25"
+                    width="25"
+                    src="../src-tauri/icons/audio.svg"
+                    alt="Volume"
+                    title="Volume"
+                  />
+                  <input
+                    onChange={handleVideoVolumeChange}
+                    type="range"
+                    defaultValue="10"
+                    min="0"
+                    max="100"
                   />
                 </div>
               </div>
             </div>
           </div>
         )}
+        {/* Check filters layout first */}
         {/* Filters */}
-        <div className="border-2">
-          Placeholder for video filter such as color grading , grayscale i.e
-          black and white video ,etc...
+        <div className="w-[20%] flex flex-col items-start space-y-10">
+          <h1 className="text-green-400 tracking-widest font-bold text-base mb-10">
+            FILTERS
+          </h1>
+          {/* Choose different filters by scrolling */}
+          <div className="grid grid-rows-2 grid-cols-3 gap-6">
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "brightness" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("brightness")}
+                  className="cursor-pointer rounded-xl h-16 w-16 brightness-150"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>Brightness</h2>
+            </div>
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "hue" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("hue")}
+                  className="cursor-pointer rounded-xl h-16 w-16 hue-rotate-60"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>Hue</h2>
+            </div>
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "saturation" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("saturation")}
+                  className="cursor-pointer rounded-xl h-16 w-16 saturate-200"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>Saturation</h2>
+            </div>
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "grayscale" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("grayscale")}
+                  className="cursor-pointer rounded-xl h-16 w-16 grayscale"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>Grayscale</h2>
+            </div>
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "sepia" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("sepia")}
+                  className="cursor-pointer rounded-xl h-16 w-16 sepia"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>Sepia</h2>
+            </div>
+          </div>
+          {/* Intensity range slider */}
+          <div className="flex flex-col space-y-4 w-full">
+            <h1>Intensity</h1>
+            <input type="range" className="" />
+          </div>
         </div>
       </main>
       {/* Video Timeline */}
-      <div className="w-full h-full p-16 flex flex-col space-y-10 bg-gradient-to-r from-[#161616] to-[#212122] divide-y-2 divide-gray-600 divide-dashed">
+      <div className="w-full h-full p-16 flex flex-col space-y-10 bg-gradient-to-r from-[#161616] to-[#212122]">
         <div className="flex items-start space-x-40">
           <h1 className="font-bold text-base tracking-widest text-green-400">
-            TIMELINE
+            EDITOR
           </h1>
           <div className="flex space-x-10">
             <div
@@ -386,19 +530,6 @@ function App() {
                 src="../src-tauri/icons/extract-audio.svg"
                 alt="Extract Audio"
                 title="Extract Audio (Ctr+A)"
-              />
-            </div>
-            <div
-              onClick={() => setSelectedEditOption("FILTER")}
-              className={`cursor-pointer w-6 h-6 transition-all duration-200 flex justify-center items-center rounded-full ${
-                selectedEditOption === "FILTER" && "bg-blue-700 p-1.5"
-              }`}
-            >
-              <img
-                className="w-full h-full rounded-full"
-                src="../src-tauri/icons/filter.svg"
-                alt="Add Filter"
-                title="Add Filter (Ctr+F)"
               />
             </div>
           </div>
@@ -486,7 +617,6 @@ function App() {
                   step="0.1"
                 />
               )}
-
               {/* Video player red slider */}
               <input
                 onChange={handleMoveVideoDuration}
@@ -494,6 +624,7 @@ function App() {
                 className="red-slider absolute z-10 appearance-none cursor-pointer outline-none bg-transparent w-full"
                 min="0"
                 max={totalVideoDuration}
+                value={currentVideoDuration}
                 step="0.1"
               />
               {/* Right trim slider */}
