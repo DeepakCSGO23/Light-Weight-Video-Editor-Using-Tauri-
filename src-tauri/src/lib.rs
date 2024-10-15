@@ -1,7 +1,9 @@
+use serde_json::{json, Value};
 use std::io::{BufRead, BufReader};
 use std::process::Stdio;
 use std::process::{Command, Output};
 use tauri::{AppHandle, Emitter};
+
 // Learn more about Tauri commands at https://tauri.app/v1/guides/features/command
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -84,7 +86,7 @@ fn extract_audio(input: &str, output: &str, app: AppHandle) -> Result<String, St
 }
 // Getting meta data of video file
 #[tauri::command]
-fn get_video_metadata(file_path: String) -> Result<String, String> {
+fn get_video_metadata(file_path: String) -> Result<serde_json::Value, String> {
     let output = Command::new("ffprobe")
         .args(&[
             "-v",
@@ -99,8 +101,31 @@ fn get_video_metadata(file_path: String) -> Result<String, String> {
         .map_err(|e| e.to_string())?;
 
     if output.status.success() {
-        let metadata = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
-        Ok(metadata)
+        // Converting raw bytes into a string which is crucial to get the output in a readable string format
+        let meta_data = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
+        // Converting string to json (parse the json from the string)
+        let v: Value = serde_json::from_str(&meta_data).map_err(|e| e.to_string())?;
+        // Extracting the video codec alone from json object called 'v'
+        let video_codec = v["streams"][0]["codec_name"].as_str().unwrap_or("Unknown");
+        // Extracting the video height alone from json object called 'v'
+        let video_height = v["streams"][0]["coded_height"].as_i64().unwrap_or(0);
+        // Extracting the video width alone from json object called 'v'
+        let video_width = v["streams"][0]["coded_width"].as_i64().unwrap_or(0);
+        // Extracting the audio codec alone from json object called 'v'
+        let audio_codec = v["streams"][1]["codec_name"].as_str().unwrap_or("Unknown");
+        // Extracting total video duration from json object called 'v'
+        let total_duration = v["format"]["duration"].as_str().unwrap_or("Unknown");
+
+        // Converting video codec which is extracted to json object
+        let result = json!({
+            "video_codec":video_codec,
+            "audio_codec":audio_codec,
+            "total_duration":total_duration,
+            "video_height":video_height,
+            "video_width":video_width
+        });
+        // Since the return type is a json object we can now return json object from rust backend to the react frontend without any error
+        Ok(result)
     } else {
         Err("Failed to get metadata".into())
     }

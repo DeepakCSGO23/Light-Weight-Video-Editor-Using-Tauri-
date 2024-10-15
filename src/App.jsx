@@ -1,17 +1,25 @@
 // Before i was installing modules which are not available
 import { useEffect, useRef, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
-import { open, confirm } from "@tauri-apps/plugin-dialog";
+import { open, confirm, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
-
 import "./App.css";
 function App() {
   const videoRef = useRef(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
-  const [videoFileName, setVideoFileName] = useState("");
-  const [videoSrc, setVideoSrc] = useState("");
-  const [videoMetaData, setVideoMetaData] = useState({});
-  const [totalVideoDuration, setTotalVideoDuration] = useState(0);
+  // ! send only needed data from the backend rust
+  const [videoInformation, setVideoInformation] = useState({
+    fileName: "",
+    // File path
+    filePath: "",
+    // Playable file path
+    filePlayableUrl: "",
+    fileVideoFormat: "",
+    videoHeight: "",
+    videoWidth: "",
+    fileAudioFormat: "",
+    fileTotalDuration: "",
+  });
   const [currentVideoDuration, setCurrentVideoDuration] = useState(0);
   const [startingDuration, setStartingDuration] = useState(0);
   const [endingDuration, setEndingDuration] = useState(0);
@@ -19,23 +27,17 @@ function App() {
     useState(false);
   const [selectedEditOption, setSelectedEditOption] = useState("trim");
   const [selectedFilter, setSelectedFilter] = useState("");
-  // Side effect is called whenever the user selects new video
+  // Side effect is called whenever the user selects new video (setups everytime a new video is opened)
   // Reference to the video element
   useEffect(() => {
     const videoElement = videoRef.current;
     if (videoElement) {
       // When the the video element is inserted in the dom we set the default volume to 0.2 i.e 20% initially
       videoElement.volume = 0.2;
-      // After the video's meta data is loaded we set the total duration state
-      const handleLoadedMetaData = () => {
-        setTotalVideoDuration(videoElement.duration);
-      };
       const handleCurrentVideoDurationChange = () => {
         // Updates the current video duration state which is used for
         setCurrentVideoDuration(videoElement.currentTime);
       };
-      // Adding event listeners to get video total duration metadata after the video's metadata is loaded
-      videoElement.addEventListener("loadedmetadata", handleLoadedMetaData);
       // The event listener listens for any change in the video i.e video duration change
       videoElement.addEventListener(
         "timeupdate",
@@ -44,10 +46,6 @@ function App() {
       // Remove the event listeners when the component unmounts
       return () => {
         videoElement.removeEventListener(
-          "loadedmetadata",
-          handleLoadedMetaData
-        );
-        videoElement.removeEventListener(
           "timeupdate",
           handleCurrentVideoDurationChange
         );
@@ -55,8 +53,8 @@ function App() {
     } else {
       console.log("no video selected");
     }
-  }, [videoSrc]);
-  // Handle spacebar to play/pause the video
+  }, [videoInformation]);
+  // Handle spacebar to play/pause the video this is setup only once
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.code === "Space") {
@@ -94,6 +92,8 @@ function App() {
           },
         ],
       });
+      // we can use this for file name and file path
+      console.log(selectedFilePath);
       if (selectedFilePath) {
         const fileUrl = convertFileSrc(selectedFilePath);
         // Getting the meta data of the video file
@@ -101,16 +101,19 @@ function App() {
           // The camelCase in javascript is converted into snake_case before passing them to the Rust function so filePath becomes file_path
           filePath: selectedFilePath,
         });
-        const videoMetaDataInJson = JSON.parse(videoMetaData);
-        console.log(videoMetaDataInJson);
-        // Setting the video's meta data
-        setVideoMetaData(videoMetaDataInJson.streams[0]);
+        console.log(videoMetaData);
+        setVideoInformation({
+          fileName: selectedFilePath.split("\\").pop(),
+          fileVideoFormat: videoMetaData.video_codec,
+          videoHeight: videoMetaData.video_height,
+          videoWidth: videoMetaData.video_width,
+          fileAudioFormat: videoMetaData.audio_codec,
+          filePath: selectedFilePath,
+          filePlayableUrl: fileUrl,
+          fileTotalDuration: videoMetaData.total_duration,
+        });
         // Closing File menu pop-up
         setShowFileMenu(false);
-        // Set the selected file path as the video source
-        setVideoSrc(fileUrl);
-        // Update the file name state of the newly selected file
-        setVideoFileName(selectedFilePath.split("\\").pop());
       } else {
         console.log("No file selected");
       }
@@ -129,7 +132,6 @@ function App() {
   };
   // When the left trim controller is moved
   const handleStartingDurationChange = (e) => {
-    console.log(e.target.value);
     //* Parsing string to float because string "9.0" is greater than "11.5" because the ascii value of '9' is greater than '1' so without remaining string it declares string "9.0" is greater than "11.5"
     const newStartingDuration = e.target.value;
     if (newStartingDuration < endingDuration) {
@@ -173,7 +175,6 @@ function App() {
     // We found a video element present in the DOM
     if (videoElement) {
       const currentVolume = e.target.value / 100;
-      console.log(currentVolume);
       videoElement.volume = currentVolume;
     }
   };
@@ -186,13 +187,19 @@ function App() {
     });
     // Confirmation is success
     if (askConfirmation) {
+      // The path where the exported video is saved
+      const outputPath = await save({
+        defaultPath: `${videoInformation.fileName}`,
+        filters: [{ name: "Video", extensions: ["mp4", "webm", "ogg"] }],
+      });
       try {
         const result = await invoke("trim_video", {
-          input: "E:/SkillRack Guide/Desktop/Sample.mp4",
-          output: "E:/SkillRack Guide/Desktop/OutputSample.mp4",
-          start: 5.0,
-          duration: 10.0,
+          input: videoInformation.filePath,
+          output: outputPath,
+          start: parseFloat(startingDuration),
+          duration: parseFloat(endingDuration - startingDuration),
         });
+        console.log(result, outputPath);
         setIsVideoTrimmedSuccessfully(true);
         setTimeout(() => {
           setIsVideoTrimmedSuccessfully(false);
@@ -218,15 +225,25 @@ function App() {
     );
     // Confirmation is success
     if (askConfirmation) {
+      console.log(videoInformation);
+      // The path where the exported audio is saved
+      const outputPath = await save({
+        defaultPath: `${
+          videoInformation.fileName.split(".")[0] +
+          "." +
+          videoInformation.fileAudioFormat
+        }`,
+        filters: [{ name: "Audio", extensions: ["mp3", "aac"] }],
+      });
       // Now the extracting audio process is started in the backend so now we are going to listen to progress events from the backend
       const unlisten = await listen("trim-progress", (e) => {
-        console.log(e.payload);
+        console.log(e.payload + "\n");
         setProgress(e.payload); // Update progress in state
       });
       try {
         const result = await invoke("extract_audio", {
-          input: "E:/SkillRack Guide/Desktop/Sample.mp4",
-          output: "E:/SkillRack Guide/Desktop/AudioSample.aac",
+          input: videoInformation.filePath,
+          output: outputPath,
         });
         setIsVideoTrimmedSuccessfully(true);
         setTimeout(() => {
@@ -268,10 +285,8 @@ function App() {
               >
                 Open Video
               </button>
-              <button className="p-2 hover:text-gray-400">Save As</button>
-              <button className="p-2 hover:text-gray-400">
-                Export Setting
-              </button>
+              <button className="p-2 hover:text-gray-400">New Project</button>
+              <button className="p-2 hover:text-gray-400">Save Project</button>
             </div>
           )}
         </div>
@@ -296,22 +311,21 @@ function App() {
           </h1>
           <div className="flex flex-col space-y-4">
             <h2 className="overflow-hidden whitespace-nowrap truncate w-72">
-              File Name : {videoFileName}
+              File Name : {videoInformation.fileName}
             </h2>
-            <h2>Height : {videoMetaData.height}</h2>
-            <h2>Width : {videoMetaData.width}</h2>
-            <h2>Avg Frame Rate : {videoMetaData.avg_frame_rate}</h2>
-            <h2>Codec Type : {videoMetaData.codec_type}</h2>
-            <h2>Codec Name : {videoMetaData.codec_name}</h2>
+            <h2>Height : {videoInformation.videoHeight}</h2>
+            <h2>Width : {videoInformation.videoWidth}</h2>
+            <h2>Video Codec Type : {videoInformation.fileVideoFormat}</h2>
+            <h2>Audio Codec Type : {videoInformation.fileAudioFormat}</h2>
           </div>
         </div>
-        {videoSrc && (
+        {videoInformation && (
           <div className="relative flex flex-col w-[50%] h-[75%]">
             {/* <h1 className="text-green-400 tracking-widest text-base font-bold">
               VIDEO
             </h1> */}
             <video
-              className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-dashed rounded-t-xl ${
+              className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-neutral-500 border-dashed rounded-t-xl ${
                 selectedEditOption === "crop" && "cursor-crosshair"
               } ${
                 selectedFilter === "brightness"
@@ -327,7 +341,7 @@ function App() {
                   : ""
               } `}
               ref={videoRef}
-              src={videoSrc}
+              src={videoInformation.filePlayableUrl}
             ></video>
             {/* Playback controls */}
             <div className="relative flex flex-col rounded-b-3xl bg-zinc-800">
@@ -335,20 +349,20 @@ function App() {
                 onChange={handleMoveVideoDuration}
                 type="range"
                 min="0"
-                max={totalVideoDuration}
+                max={videoInformation.fileTotalDuration}
                 value={currentVideoDuration}
                 step="0.1"
                 className="play-back w-full"
               />
-              <div className="flex items-center space-x-40 p-4 pb-6 ml-10">
-                {currentVideoDuration && totalVideoDuration && (
+              <div className="flex items-center space-x-44 p-4 pb-6 ml-10">
+                {currentVideoDuration && videoInformation.fileTotalDuration && (
                   <span className="w-fit">
                     {formatFloatDurationToIntegerVideoDuration(
                       currentVideoDuration
                     )}{" "}
                     /{" "}
                     {formatFloatDurationToIntegerVideoDuration(
-                      totalVideoDuration
+                      videoInformation.fileTotalDuration
                     )}
                   </span>
                 )}
@@ -399,7 +413,7 @@ function App() {
         {/* Filters */}
         <div className="w-[20%] flex flex-col items-start space-y-10">
           <h1 className="text-green-400 tracking-widest font-bold text-base mb-10">
-            FILTERS
+            FILTER
           </h1>
           {/* Choose different filters by scrolling */}
           <div className="grid grid-rows-2 grid-cols-3 gap-6">
@@ -544,7 +558,10 @@ function App() {
                 Ending Duration :{" "}
                 {formatFloatDurationToIntegerVideoDuration(endingDuration)}
               </h1>
-              <button className="relative bottom-4 bg-white text-black p-4 pl-6 pr-6 rounded-full">
+              <button
+                onClick={handleTrimmingVideo}
+                className="relative bottom-4 bg-white text-black p-4 pl-6 pr-6 rounded-full"
+              >
                 Trim Video
               </button>
             </div>
@@ -571,17 +588,19 @@ function App() {
         </div>
         {/* Video & Audio Layer */}
         <div className="h-full flex items-center space-x-10">
-          {videoFileName && (
+          {videoInformation && (
             <h1 className="max-w-20 h-10 overflow-hidden text-ellipsis">
-              {videoFileName}
+              {videoInformation.fileName}
             </h1>
           )}
           {/* The Timeline 🥱 */}
           <div className="relative flex h-32 w-full overflow-x-auto border-2 border-gray-600 rounded-xl pl-8 pr-8 pt-2">
             {/* Wrapper - This saved my life */}
-            <div className="flex absolute whitespace-nowrap min-w-full">
-              {totalVideoDuration &&
-                Array.from({ length: Math.ceil(totalVideoDuration / 10) }).map(
+            <div className="flex absolute whitespace-nowrap min-w-fit">
+              {videoInformation &&
+                Array.from({
+                  length: Math.ceil(videoInformation.fileTotalDuration / 10),
+                }).map(
                   // Create Ruler-like ui
                   (_, index) => (
                     <div key={index} className="flex flex-col">
@@ -612,7 +631,7 @@ function App() {
                   type="range"
                   className="min absolute z-10 appearance-none cursor-pointer outline-none bg-transparent w-full"
                   min="0"
-                  max={totalVideoDuration}
+                  max={videoInformation.fileTotalDuration}
                   value={startingDuration}
                   step="0.1"
                 />
@@ -623,7 +642,7 @@ function App() {
                 type="range"
                 className="red-slider absolute z-10 appearance-none cursor-pointer outline-none bg-transparent w-full"
                 min="0"
-                max={totalVideoDuration}
+                max={videoInformation.fileTotalDuration}
                 value={currentVideoDuration}
                 step="0.1"
               />
@@ -634,7 +653,7 @@ function App() {
                   type="range"
                   className="max absolute z-10 appearance-none cursor-pointer outline-none bg-transparent w-full"
                   min="0"
-                  max={totalVideoDuration}
+                  max={videoInformation.fileTotalDuration}
                   value={endingDuration}
                   step="0.1"
                 />
