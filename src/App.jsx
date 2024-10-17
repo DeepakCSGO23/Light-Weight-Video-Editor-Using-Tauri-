@@ -7,18 +7,20 @@ import "./App.css";
 function App() {
   const videoRef = useRef(null);
   const [showFileMenu, setShowFileMenu] = useState(false);
-  // ! send only needed data from the backend rust
   const [videoInformation, setVideoInformation] = useState({
     fileName: "",
-    // File path
     filePath: "",
-    // Playable file path
     filePlayableUrl: "",
-    fileVideoFormat: "",
     videoHeight: "",
     videoWidth: "",
-    fileAudioFormat: "",
     fileTotalDuration: "",
+    videoCodec: "",
+    audioCodec: "",
+    videoBitRate: "",
+    audioBitRate: "",
+    videoAspectRatio: "",
+    videoFrameRate: "",
+    totalAudioChannels: "",
   });
   const [currentVideoDuration, setCurrentVideoDuration] = useState(0);
   const [startingDuration, setStartingDuration] = useState(0);
@@ -27,6 +29,7 @@ function App() {
     useState(false);
   const [selectedEditOption, setSelectedEditOption] = useState("trim");
   const [selectedFilter, setSelectedFilter] = useState("");
+  const [filterIntensity, setFilterIntensity] = useState("");
   // Side effect is called whenever the user selects new video (setups everytime a new video is opened)
   // Reference to the video element
   useEffect(() => {
@@ -104,13 +107,18 @@ function App() {
         console.log(videoMetaData);
         setVideoInformation({
           fileName: selectedFilePath.split("\\").pop(),
-          fileVideoFormat: videoMetaData.video_codec,
           videoHeight: videoMetaData.video_height,
           videoWidth: videoMetaData.video_width,
-          fileAudioFormat: videoMetaData.audio_codec,
           filePath: selectedFilePath,
           filePlayableUrl: fileUrl,
           fileTotalDuration: videoMetaData.total_duration,
+          audioBitRate: videoMetaData.audio_bitrate,
+          audioCodec: videoMetaData.audio_codec,
+          totalAudioChannels: videoMetaData.total_audio_channels,
+          videoAspectRatio: videoMetaData.aspect_ratio,
+          videoBitRate: videoMetaData.video_bitrate,
+          videoCodec: videoMetaData.video_codec,
+          videoFrameRate: videoMetaData.frame_rate,
         });
         // Closing File menu pop-up
         setShowFileMenu(false);
@@ -231,7 +239,7 @@ function App() {
         defaultPath: `${
           videoInformation.fileName.split(".")[0] +
           "." +
-          videoInformation.fileAudioFormat
+          videoInformation.audioCodec
         }`,
         filters: [{ name: "Audio", extensions: ["mp3", "aac"] }],
       });
@@ -286,7 +294,8 @@ function App() {
                 Open Video
               </button>
               <button className="p-2 hover:text-gray-400">New Project</button>
-              <button className="p-2 hover:text-gray-400">Save Project</button>
+              <button className="p-2 hover:text-gray-400">Help</button>
+              <button className="p-2 hover:text-gray-400">Exit</button>
             </div>
           )}
         </div>
@@ -309,14 +318,24 @@ function App() {
           <h1 className="tracking-widest font-bold text-base text-green-400 mb-10">
             META-DATA
           </h1>
-          <div className="flex flex-col space-y-4">
+          <div className="flex flex-col space-y-4 h-[60%] overflow-y-auto">
             <h2 className="overflow-hidden whitespace-nowrap truncate w-72">
               File Name : {videoInformation.fileName}
             </h2>
             <h2>Height : {videoInformation.videoHeight}</h2>
             <h2>Width : {videoInformation.videoWidth}</h2>
-            <h2>Video Codec Type : {videoInformation.fileVideoFormat}</h2>
-            <h2>Audio Codec Type : {videoInformation.fileAudioFormat}</h2>
+            <h2>Video Codec Type : {videoInformation.videoCodec}</h2>
+            <h2>Audio Codec Type : {videoInformation.audioCodec}</h2>
+            <h2>Video Bit-rate : {videoInformation.videoBitRate} kbps</h2>
+            <h2>Audio Bit-rate : {videoInformation.audioBitRate} kbps</h2>
+            <h2>
+              Total Duration : {videoInformation.fileTotalDuration} seconds
+            </h2>
+            <h2>
+              Total Audio channels : {videoInformation.totalAudioChannels}
+            </h2>
+            <h2>Ratio : {videoInformation.videoAspectRatio}</h2>
+            <h2>Frame Rate : {videoInformation.videoFrameRate} fps</h2>
           </div>
         </div>
         {videoInformation && (
@@ -327,19 +346,14 @@ function App() {
             <video
               className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-neutral-500 border-dashed rounded-t-xl ${
                 selectedEditOption === "crop" && "cursor-crosshair"
-              } ${
-                selectedFilter === "brightness"
-                  ? "brightness-150"
-                  : selectedFilter === "hue"
-                  ? "hue-rotate-90"
-                  : selectedFilter === "saturation"
-                  ? "saturate-150"
-                  : selectedFilter === "grayscale"
-                  ? "grayscale"
-                  : selectedFilter === "sepia"
-                  ? "sepia"
-                  : ""
-              } `}
+              }`}
+              style={{
+                filter: selectedFilter
+                  ? `${selectedFilter}(${filterIntensity}${
+                      selectedFilter === "hue-rotate" ? "deg" : "%"
+                    })`
+                  : "none",
+              }}
               ref={videoRef}
               src={videoInformation.filePlayableUrl}
             ></video>
@@ -418,6 +432,7 @@ function App() {
           {/* Choose different filters by scrolling */}
           <div className="grid grid-rows-2 grid-cols-3 gap-6">
             <div className="flex flex-col items-center space-y-2">
+              {/* First use {``} to embedd Javascript inside jsx and use `` inside {``} */}
               <div
                 className={`${
                   selectedFilter === "brightness" && "border-2 border-blue-600"
@@ -435,11 +450,11 @@ function App() {
             <div className="flex flex-col items-center space-y-2">
               <div
                 className={`${
-                  selectedFilter === "hue" && "border-2 border-blue-600"
+                  selectedFilter === "hue-rotate" && "border-2 border-blue-600"
                 } rounded-xl`}
               >
                 <img
-                  onClick={() => setSelectedFilter("hue")}
+                  onClick={() => setSelectedFilter("hue-rotate")}
                   className="cursor-pointer rounded-xl h-16 w-16 hue-rotate-60"
                   src="../src-tauri/icons/sample.png"
                   alt="Sample Image"
@@ -454,7 +469,7 @@ function App() {
                 } rounded-xl`}
               >
                 <img
-                  onClick={() => setSelectedFilter("saturation")}
+                  onClick={() => setSelectedFilter("saturate")}
                   className="cursor-pointer rounded-xl h-16 w-16 saturate-200"
                   src="../src-tauri/icons/sample.png"
                   alt="Sample Image"
@@ -492,11 +507,32 @@ function App() {
               </div>
               <h2>Sepia</h2>
             </div>
+            <div className="flex flex-col items-center space-y-2">
+              <div
+                className={`${
+                  selectedFilter === "" && "border-2 border-blue-600"
+                } rounded-xl`}
+              >
+                <img
+                  onClick={() => setSelectedFilter("")}
+                  className="cursor-pointer rounded-xl h-16 w-16"
+                  src="../src-tauri/icons/sample.png"
+                  alt="Sample Image"
+                />
+              </div>
+              <h2>None</h2>
+            </div>
           </div>
           {/* Intensity range slider */}
           <div className="flex flex-col space-y-4 w-full">
             <h1>Intensity</h1>
-            <input type="range" className="" />
+            <input
+              onChange={(e) => setFilterIntensity(e.target.value)}
+              min="0"
+              max="200"
+              type="range"
+              className=""
+            />
           </div>
         </div>
       </main>
