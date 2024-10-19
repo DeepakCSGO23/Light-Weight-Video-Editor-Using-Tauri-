@@ -3,10 +3,13 @@ import { useEffect, useRef, useState } from "react";
 import { invoke, convertFileSrc } from "@tauri-apps/api/core";
 import { open, confirm, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
+import Lottie from "lottie-react";
+import LoadingAnimation from "../src-tauri/animations/loading_animation.json";
 import "./App.css";
 function App() {
   const videoRef = useRef(null);
-  const [showFileMenu, setShowFileMenu] = useState(false);
+  const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
+  const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [videoInformation, setVideoInformation] = useState({
     fileName: "",
     filePath: "",
@@ -121,7 +124,7 @@ function App() {
           videoFrameRate: videoMetaData.frame_rate,
         });
         // Closing File menu pop-up
-        setShowFileMenu(false);
+        setIsFileMenuOpen(false);
       } else {
         console.log("No file selected");
       }
@@ -233,7 +236,6 @@ function App() {
     );
     // Confirmation is success
     if (askConfirmation) {
-      console.log(videoInformation);
       // The path where the exported audio is saved
       const outputPath = await save({
         defaultPath: `${
@@ -249,14 +251,18 @@ function App() {
         setProgress(e.payload); // Update progress in state
       });
       try {
+        // !check program flow
+        // Show the loading animation now
+        setIsVideoTrimmedSuccessfully(true);
+        // We are waiting for the extraction of audio process to complete until then the loading animation is shown
         const result = await invoke("extract_audio", {
           input: videoInformation.filePath,
           output: outputPath,
         });
-        setIsVideoTrimmedSuccessfully(true);
+        // If we are here then it means we have completed the process so after a 2 seconds delay remove the loading animation
         setTimeout(() => {
           setIsVideoTrimmedSuccessfully(false);
-        }, 4000);
+        }, 2000);
       } catch (error) {
         console.error("Error extracting audio from video:", error);
       } finally {
@@ -264,11 +270,23 @@ function App() {
         unlisten();
       }
     }
-    // The user cancels the trimming process
-    else {
-      console.log("User cancelled the trimming process");
-    }
   }
+  // Handle closing of the application
+  // Handle closing of the application
+  const handleExitingApp = async (e) => {
+    try {
+      const isConfirmed = await confirm("Are you sure?");
+      if (isConfirmed) {
+        try {
+          await invoke("exit_app");
+        } catch (err) {
+          console.error("Error exiting app:", err);
+        }
+      }
+    } catch (err) {
+      console.error("Error showing confirmation dialog:", err);
+    }
+  };
   // Formating duration in 00:00:00 format
   const formatFloatDurationToIntegerVideoDuration = (seconds) => {
     // Converting float to integer because we don't want something like this 00:02:5.7000 we only want like this 00:02:05
@@ -283,28 +301,58 @@ function App() {
   return (
     <div className="bg-[#121212] h-screen w-screen text-white text-sm font-roboto flex flex-col justify-start items-center">
       <header className="p-2 bg-white text-black flex justify-between items-center w-screen">
-        <div className="relative w-full">
-          <button onClick={() => setShowFileMenu(!showFileMenu)}>File</button>
-          {showFileMenu && (
-            <div className="absolute z-10 p-2 bg-gray-200 w-[8%] flex flex-col rounded shadow-lg">
+        <div className="relative w-full space-x-4">
+          <button onClick={() => setIsFileMenuOpen(!isFileMenuOpen)}>
+            File
+          </button>
+          <button onClick={() => setIsHelpMenuOpen(!isHelpMenuOpen)}>
+            Help
+          </button>
+          {isFileMenuOpen && (
+            <div className="absolute z-10  bg-gray-400 text-white w-[8%] flex flex-col rounded shadow-lg">
               <button
-                className="p-2 hover:text-gray-400"
+                className="p-2 hover:bg-gray-800"
                 onClick={handleOpeningFile}
               >
                 Open Video
               </button>
-              <button className="p-2 hover:text-gray-400">New Project</button>
-              <button className="p-2 hover:text-gray-400">Help</button>
-              <button className="p-2 hover:text-gray-400">Exit</button>
+              <button className="p-2 hover:bg-gray-800">New Project</button>
+              <button className="p-2 hover:bg-gray-800">New Window</button>
+              <button
+                onClick={handleExitingApp}
+                className="p-2 hover:bg-gray-800"
+              >
+                Exit
+              </button>
+            </div>
+          )}
+          {isHelpMenuOpen && (
+            <div className="absolute z-10  bg-gray-400 text-white w-[8%] flex flex-col rounded shadow-lg">
+              <button
+                className="p-2 hover:bg-gray-800"
+                onClick={handleOpeningFile}
+              >
+                Documentation
+              </button>
+              <button
+                onClick={handleExitingApp}
+                className="p-2 hover:bg-gray-800"
+              >
+                Check for updates
+              </button>
             </div>
           )}
         </div>
       </header>
       {/* Confirmation message after successfuly trimming the video */}
       {isVideoTrimmedSuccessfully && (
-        <div className="absolute left-1/4 top-1/4 h-80 w-80 z-20 bg-green-400 text-white p-4 flex flex-col items-center justify-center rounded-3xl">
-          <h1>Hooray! Your video is trimmed and looking fabulous!</h1>
-          <span>E:/SkillRack Guide/Desktop/OutputSample.mp4</span>
+        <div className="absolute left-1/4 top-1/4 h-1/2 w-1/2 z-20 bg-white text-black flex flex-col items-center justify-center rounded-3xl">
+          <h1 className="text-base">Trimming in progress... Please wait!</h1>
+          <Lottie
+            className="h-64 w-64 "
+            animationData={LoadingAnimation}
+            loop={true}
+          />
         </div>
       )}
       {/* Video Player and Playback controls */}
@@ -340,9 +388,7 @@ function App() {
         </div>
         {videoInformation && (
           <div className="relative flex flex-col w-[50%] h-[75%]">
-            {/* <h1 className="text-green-400 tracking-widest text-base font-bold">
-              VIDEO
-            </h1> */}
+            {/* <div className="absolute h-full w-full border-2"></div> */}
             <video
               className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-neutral-500 border-dashed rounded-t-xl ${
                 selectedEditOption === "crop" && "cursor-crosshair"

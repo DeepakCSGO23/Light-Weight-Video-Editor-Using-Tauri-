@@ -153,6 +153,11 @@ fn get_video_metadata(file_path: String) -> Result<serde_json::Value, String> {
         Err("Failed to get metadata".into())
     }
 }
+// For closing the application
+#[tauri::command]
+fn exit_app() {
+    std::process::exit(0x0);
+}
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -162,7 +167,8 @@ pub fn run() {
             greet,
             trim_video,
             extract_audio,
-            get_video_metadata
+            get_video_metadata,
+            exit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
