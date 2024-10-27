@@ -5,9 +5,12 @@ import { open, confirm, save } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import Lottie from "lottie-react";
 import LoadingAnimation from "../src-tauri/animations/loading_animation.json";
+import WebcamModal from "./components/WebcamModal";
 import "./App.css";
 function App() {
   const videoRef = useRef(null);
+  const croppingDivRef = useRef(null);
+  const croppingDivParentRef = useRef(null);
   const [isFileMenuOpen, setIsFileMenuOpen] = useState(false);
   const [isHelpMenuOpen, setIsHelpMenuOpen] = useState(false);
   const [videoInformation, setVideoInformation] = useState({
@@ -30,9 +33,11 @@ function App() {
   const [endingDuration, setEndingDuration] = useState(0);
   const [isVideoTrimmedSuccessfully, setIsVideoTrimmedSuccessfully] =
     useState(false);
+  const [croppedSize, setCroppedSize] = useState({ height: 0, width: 0 });
   const [selectedEditOption, setSelectedEditOption] = useState("trim");
   const [selectedFilter, setSelectedFilter] = useState("");
   const [filterIntensity, setFilterIntensity] = useState("");
+
   // Side effect is called whenever the user selects new video (setups everytime a new video is opened)
   // Reference to the video element
   useEffect(() => {
@@ -42,7 +47,7 @@ function App() {
       videoElement.volume = 0.2;
       const handleCurrentVideoDurationChange = () => {
         // Updates the current video duration state which is used for
-        setCurrentVideoDuration(videoElement.currentTime);
+        setCurrentVideoDuration(videoElement.currentTime || 0);
       };
       // The event listener listens for any change in the video i.e video duration change
       videoElement.addEventListener(
@@ -62,6 +67,15 @@ function App() {
   }, [videoInformation]);
   // Handle spacebar to play/pause the video this is setup only once
   useEffect(() => {
+    const getUpdatesJSON = async () => {
+      // ! We cannot access resource at 'https://cherry-gnome.netlify.app' from origin 'http://localhost:1420' (blocked by CORS)
+      const response = await fetch(
+        "https://cheery-gnome-0de2ae.netlify.app/updates.json"
+      );
+      const data = await response.json();
+      console.log(data);
+    };
+    getUpdatesJSON();
     const handleKeyDown = (e) => {
       if (e.code === "Space") {
         const videoElement = videoRef.current;
@@ -84,6 +98,33 @@ function App() {
     return () => {
       window.removeEventListener("keydown", handleKeyDown);
     };
+  }, []);
+  // Load the resize observer when the component mounts for the first time
+  useEffect(() => {
+    const croppingDiv = croppingDivRef.current;
+    const croppingDivParentDiv = croppingDivParentRef.current;
+    const croppingDivParentDivHeight =
+      croppingDivParentDiv.getBoundingClientRect().height;
+    // Log the current height of the div whenever the mouse moves
+    const handleMouseMoveAfterMouseDown = () => {
+      const croppingDivDOMRect = croppingDiv.getBoundingClientRect();
+      console.log(croppingDivDOMRect.height);
+    };
+    // Mouse down when the user presses the mouse button
+    croppingDiv.addEventListener("mousedown", () => {
+      // Listening for any move movements when the mouse is still pressed
+      document.addEventListener("mousemove", handleMouseMoveAfterMouseDown);
+    });
+    croppingDiv.addEventListener("mouseup", () => {
+      document.removeEventListener("mousemove", handleMouseMoveAfterMouseDown);
+    });
+    // return () => {
+    //   croppingDiv.addEventListener("mouseup", () => {
+    //     croppingDiv.removeEventListener("mousemove", () => {
+    //       console.log("mouse move event removed!");
+    //     });
+    //   });
+    // };
   }, []);
 
   const handleOpeningFile = async () => {
@@ -289,6 +330,9 @@ function App() {
   };
   // Formating duration in 00:00:00 format
   const formatFloatDurationToIntegerVideoDuration = (seconds) => {
+    if (seconds === 0) {
+      return "00:00:00";
+    }
     // Converting float to integer because we don't want something like this 00:02:5.7000 we only want like this 00:02:05
     let newSeconds = parseInt(seconds);
     const hours = Math.floor(newSeconds / 3600);
@@ -355,6 +399,10 @@ function App() {
           />
         </div>
       )}
+      {/* Showing webcam modal */}
+
+      <WebcamModal isOpen={selectedEditOption} />
+
       {/* Video Player and Playback controls */}
       <main className="w-[100%] h-[60%] flex p-16 space-x-40">
         {/* Video file meta data */}
@@ -387,12 +435,23 @@ function App() {
           </div>
         </div>
         {videoInformation && (
-          <div className="relative flex flex-col w-[50%] h-[75%]">
-            {/* <div className="absolute h-full w-full border-2"></div> */}
+          <div
+            ref={croppingDivParentRef}
+            className="relative flex flex-col w-[50%] h-[75%]"
+          >
+            <div
+              ref={croppingDivRef}
+              className="absolute border-2 h-full w-full z-10 overflow-hidden cursor-move bg-gray-400/20"
+            >
+              {croppedSize && (
+                <span>
+                  Height : {croppedSize.height} <br /> Width :{" "}
+                  {croppedSize.width}{" "}
+                </span>
+              )}
+            </div>
             <video
-              className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-neutral-500 border-dashed rounded-t-xl ${
-                selectedEditOption === "crop" && "cursor-crosshair"
-              }`}
+              className={`h-full w-full shadow-2xl bg-neutral-800 border-x-2 border-t-2 border-neutral-500 border-dashed rounded-t-xl`}
               style={{
                 filter: selectedFilter
                   ? `${selectedFilter}(${filterIntensity}${
@@ -616,7 +675,9 @@ function App() {
               />
             </div>
             <div
-              onClick={() => setSelectedEditOption("extract-audio")}
+              onClick={() => {
+                setSelectedEditOption("extract-audio");
+              }}
               className={`cursor-pointer w-6 h-6 transition-all duration-200 flex justify-center items-center rounded-full ${
                 selectedEditOption === "extract-audio" && "bg-blue-700 p-1.5"
               }`}
@@ -626,6 +687,21 @@ function App() {
                 src="../src-tauri/icons/extract-audio.svg"
                 alt="Extract Audio"
                 title="Extract Audio (Ctr+A)"
+              />
+            </div>
+            <div
+              onClick={() => {
+                setSelectedEditOption("record");
+              }}
+              className={`cursor-pointer w-6 h-6 transition-all duration-200 flex justify-center items-center rounded-full ${
+                selectedEditOption === "record" && "bg-blue-700 p-1.5"
+              }`}
+            >
+              <img
+                className="w-full h-full rounded-full"
+                src="../src-tauri/icons/record.svg"
+                alt="Record Video"
+                title="Record Video (Ctr+R)"
               />
             </div>
           </div>
